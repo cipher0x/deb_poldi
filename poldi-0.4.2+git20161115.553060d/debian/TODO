@@ -1,0 +1,5 @@
+Use that new "PAM modules autoconfiguration stuff"; drop the config
+snippet where it should go. Do not enable by default, though: poldi is
+too buggy.
+
+Move to debhelper compat 7

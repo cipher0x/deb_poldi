@@ -1,0 +1,30 @@
+Description: LDFLAGS should be handled to build PAM module
+Author: NIIBE Yutaka
+Last-Update: 2013-07-10
+
+Index: poldi-0.4.1/src/pam/Makefile.am
+===================================================================
+--- poldi-0.4.1.orig/src/pam/Makefile.am	2013-07-10 12:48:56.864526379 +0000
++++ poldi-0.4.1/src/pam/Makefile.am	2013-07-10 12:48:56.820526375 +0000
+@@ -61,7 +61,7 @@
+ 
+ pam_poldi.so: libpam_poldi.a $(AUTH_METHODS_LIBS) auth-support/libpam-poldi-auth-support.a \
+ 		../scd/libscd_shared.a ../util/libpoldi-util_shared.a
+-	gcc -shared -o pam_poldi.so -Wl,-u,pam_sm_authenticate \
++	$(CC) $(LDFLAGS) -shared -o pam_poldi.so -Wl,-u,pam_sm_authenticate \
+ 		libpam_poldi.a \
+ 		$(AUTH_METHODS_LIBS) auth-support/libpam-poldi-auth-support.a \
+ 		../scd/libscd_shared.a ../util/libpoldi-util_shared.a ../assuan/libassuan.a \
+Index: poldi-0.4.1/src/pam/Makefile.in
+===================================================================
+--- poldi-0.4.1.orig/src/pam/Makefile.in	2013-07-10 12:48:56.864526379 +0000
++++ poldi-0.4.1/src/pam/Makefile.in	2013-07-10 12:48:56.820526375 +0000
+@@ -592,7 +592,7 @@
+ 
+ pam_poldi.so: libpam_poldi.a $(AUTH_METHODS_LIBS) auth-support/libpam-poldi-auth-support.a \
+ 		../scd/libscd_shared.a ../util/libpoldi-util_shared.a
+-	gcc -shared -o pam_poldi.so -Wl,-u,pam_sm_authenticate \
++	$(CC) $(LDFLAGS) -shared -o pam_poldi.so -Wl,-u,pam_sm_authenticate \
+ 		libpam_poldi.a \
+ 		$(AUTH_METHODS_LIBS) auth-support/libpam-poldi-auth-support.a \
+ 		../scd/libscd_shared.a ../util/libpoldi-util_shared.a ../assuan/libassuan.a \

@@ -1,0 +1,2580 @@
+diff --git a/configure b/configure
+index f0e4271..003d4a1 100755
+--- a/configure
++++ b/configure
+@@ -5408,7 +5408,7 @@ elif test $ac_cv_prog_cc_g = yes; then
+   fi
+ else
+   if test "$GCC" = yes; then
+-    CFLAGS="-O2"
++    CFLAGS="-g -O2"
+   else
+     CFLAGS=
+   fi
+diff --git a/doc/poldi.texi b/doc/poldi.texi
+index f6b3d80..07a1094 100644
+--- a/doc/poldi.texi
++++ b/doc/poldi.texi
+@@ -97,7 +97,8 @@ section entitled ``Copying''.
+ 
+ Poldi is a PAM module implementing challenge/response based
+ authentication through the OpenPGP
+-smartcard@footnote{http://www.g10code.de/p-card.html}.  It makes use of
++smartcard@footnote{http://www.g10code.de/p-card.html}.  It also supports
++session setup for OpenPgp to keep the card unlocked after login. It makes use of
+ several GnuPG components@footnote{Libgcrypt, Assuan, Scdaemon, Dirmngr}
+ and currently supports two authentication methods:
+ 
+@@ -557,7 +558,8 @@ Now, things should be ready for trying authentication.
+ 
+ Authentication through Poldi should be tested before activating the
+ module.  For this purpose, the Poldi package includes a simple program
+-named ``pam-test'', which is suitable for testing PAM authentication.
++named ``pam-test'', which is suitable for testing PAM authentication and
++a program named session-test for testing the session functionality.
+ 
+ @menu
+ * The pam-test program::
+diff --git a/src/pam/Makefile.am b/src/pam/Makefile.am
+index 968fb71..dee4e82 100644
+--- a/src/pam/Makefile.am
++++ b/src/pam/Makefile.am
+@@ -37,7 +37,8 @@ AM_CFLAGS = \
+ 	-I$(top_srcdir)/src \
+ 	-I$(top_srcdir)/util \
+ 	$(GPG_ERROR_CFLAGS) \
+-	$(LIBGCRYPT_CFLAGS)
++	$(LIBGCRYPT_CFLAGS) \
++	-lkeyutils
+ 
+ AUTH_METHODS =
+ AUTH_METHODS_LIBS =
+@@ -65,7 +66,7 @@ pam_poldi.so: libpam_poldi.a $(AUTH_METHODS_LIBS) auth-support/libpam-poldi-auth
+ 		libpam_poldi.a \
+ 		$(AUTH_METHODS_LIBS) auth-support/libpam-poldi-auth-support.a \
+ 		../scd/libscd_shared.a ../util/libpoldi-util_shared.a ../assuan/libassuan.a \
+-		$(LIBGCRYPT_LIBS) $(KSBA_LIBS)
++		$(LIBGCRYPT_LIBS) $(KSBA_LIBS) -lkeyutils
+ 
+ all-local: pam_poldi.so
+ 
+diff --git a/src/pam/Makefile.in b/src/pam/Makefile.in
+index 82c6603..45d742b 100644
+--- a/src/pam/Makefile.in
++++ b/src/pam/Makefile.in
+@@ -380,7 +380,8 @@ AM_CFLAGS = \
+ 	-I$(top_srcdir)/src \
+ 	-I$(top_srcdir)/util \
+ 	$(GPG_ERROR_CFLAGS) \
+-	$(LIBGCRYPT_CFLAGS)
++	$(LIBGCRYPT_CFLAGS) \
++	-lkeyutils
+ 
+ AUTH_METHODS = $(am__append_1) $(am__append_3)
+ AUTH_METHODS_LIBS = $(am__append_2) $(am__append_4)
+@@ -739,7 +740,7 @@ pam_poldi.so: libpam_poldi.a $(AUTH_METHODS_LIBS) auth-support/libpam-poldi-auth
+ 		libpam_poldi.a \
+ 		$(AUTH_METHODS_LIBS) auth-support/libpam-poldi-auth-support.a \
+ 		../scd/libscd_shared.a ../util/libpoldi-util_shared.a ../assuan/libassuan.a \
+-		$(LIBGCRYPT_LIBS) $(KSBA_LIBS)
++		$(LIBGCRYPT_LIBS) $(KSBA_LIBS) -lkeyutils
+ 
+ all-local: pam_poldi.so
+ 
+diff --git a/src/pam/auth-method-localdb/Makefile.am b/src/pam/auth-method-localdb/Makefile.am
+index c033f16..ac528b0 100644
+--- a/src/pam/auth-method-localdb/Makefile.am
++++ b/src/pam/auth-method-localdb/Makefile.am
+@@ -11,7 +11,7 @@
+ # ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ # or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
+ # License for more details.
+-# 
++#
+ # You should have received a copy of the GNU General Public License
+ # along with this program; if not, write to the Free Software
+ # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
+diff --git a/src/pam/auth-method-localdb/auth-localdb.c b/src/pam/auth-method-localdb/auth-localdb.c
+index d73808d..f9041f7 100644
+--- a/src/pam/auth-method-localdb/auth-localdb.c
++++ b/src/pam/auth-method-localdb/auth-localdb.c
+@@ -1,18 +1,18 @@
+ /* auth-localdb.c - localdb authentication method for Poldi.
+    Copyright (C) 2004, 2005, 2007, 2008, 2009 g10 Code GmbH
+- 
++
+    This file is part of Poldi.
+- 
++
+    Poldi is free software; you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 3 of the License, or
+    (at your option) any later version.
+- 
++
+    Poldi is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    General Public License for more details.
+- 
++
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, see
+    <http://www.gnu.org/licenses/>.  */
+@@ -33,15 +33,17 @@
+ 
+ #include "scd/scd.h"
+ #include "util/support.h"
++#include "util/key-types.h"
++#include "util/debugTools.h"
+ #include "auth-support/ctx.h"
+ #include "auth-support/wait-for-card.h"
+ 
+ #include "usersdb.h"
+ #include "key-lookup.h"
+ 
+-
+ 
+ #if 0
++
+ /* Currently, the localdb method doesn't require a special cookie. */
+ 
+ static gpg_error_t
+@@ -79,6 +81,7 @@ auth_method_localdb_auth_do (poldi_ctx_t ctx,
+   size_t challenge_n;
+   size_t response_n;
+   gcry_sexp_t key;
++  key_types key_type;
+   gpg_error_t err;
+   char *card_username;
+   const char *username;
+@@ -143,8 +146,24 @@ auth_method_localdb_auth_do (poldi_ctx_t ctx,
+   if (err)
+     goto out;
+ 
++  /* Retrieve key type */
++  err = get_key_type(&key_type, key);
++  if(err) {
++    //unsupported crypto
++    log_msg_error (ctx->loghandle,
++       "Unsupported Key Type\n");
++
++       goto out;
++     }
++  /*Print out key type if debug is enabled */
++  if (ctx->debug) {
++    log_msg_debug (ctx->loghandle,
++       "Key Type "
++       "`%s'", key_type_to_str(key_type));
++  }
++
+   /* Generate challenge.  */
+-  err = challenge_generate (&challenge, &challenge_n);
++  err = challenge_generate (&challenge, &challenge_n, key_type);
+   if (err)
+     {
+       log_msg_error (ctx->loghandle,
+@@ -154,7 +173,7 @@ auth_method_localdb_auth_do (poldi_ctx_t ctx,
+     }
+ 
+   /* Let card sign the challenge.  */
+-  err = scd_pksign (ctx->scd, "OPENPGP.3",
++  err = scd_pksign (ctx->scd, "OPENPGP.3", key_type,
+ 		    challenge, challenge_n,
+ 		    &response, &response_n);
+   if (err)
+@@ -165,8 +184,47 @@ auth_method_localdb_auth_do (poldi_ctx_t ctx,
+       goto out;
+     }
+ 
++  /*DEBUG LOG S Expressions */
++  if (ctx->debug) {
++    char outBuff[4096];
++    gcry_sexp_t sexp_signature = NULL;
++
++    switch (key_type)
++    {
++      case kType_rsa:
++      err = gcry_sexp_build (&sexp_signature, NULL, "(sig-val(rsa(s%b)))",
++           response_n,response);
++        break;
++
++      case kType_ecc_Ed25519:
++      err = gcry_sexp_build (&sexp_signature, NULL, "(sig-val(eddsa(r%b)(s%b)))",
++                             (int)response_n/2, response,
++                             (int)response_n/2, response + response_n/2);
++        break;
++
++      default:
++        err = GPG_ERR_CONFIGURATION;
++    }//switch
++    //log public key
++    //log_msg_debug(ctx->loghandle, "%s","Public_KEY");
++    outBuff[0] = 0;
++    sprintSEXP_Ed25519(key, outBuff, 4096);
++    log_msg_debug(ctx->loghandle, "Public_KEY: %s",outBuff);
++    outBuff[0] = 0;
++
++    //log Signature
++    //log_msg_debug(ctx->loghandle, "%s","Signature");
++    sprintSEXP_Ed25519(sexp_signature, outBuff, 4096);
++    log_msg_debug(ctx->loghandle, "Signature: %s",outBuff);
++    outBuff[0] = 0;
++
++    //free resources
++    gcry_sexp_release(sexp_signature);
++
++  }//if debug
++
+   /* Verify response.  */
+-  err = challenge_verify (key, challenge, challenge_n, response, response_n);
++  err = challenge_verify (key, key_type, challenge, challenge_n, response, response_n);
+   if (err)
+     {
+       log_msg_error (ctx->loghandle, "failed to verify challenge");
+diff --git a/src/pam/auth-method-localdb/key-lookup.c b/src/pam/auth-method-localdb/key-lookup.c
+index 20fce4a..708148a 100644
+--- a/src/pam/auth-method-localdb/key-lookup.c
++++ b/src/pam/auth-method-localdb/key-lookup.c
+@@ -1,22 +1,22 @@
+ /* key-lookup.c - Lookup keys for localdb authentication
+    Copyright (C) 2004, 2005, 2007, 2008 g10 Code GmbH
+- 
++
+    This file is part of Poldi.
+- 
++
+    Poldi is free software; you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 3 of the License, or
+    (at your option) any later version.
+- 
++
+    Poldi is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    General Public License for more details.
+- 
++
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, see
+    <http://www.gnu.org/licenses/>.  */
+- 
++
+ #include <poldi.h>
+ 
+ #include <unistd.h>
+@@ -28,11 +28,11 @@
+ 
+ #include "util/support.h"
+ #include "util/filenames.h"
++#include "util/key-types.h"
+ #include "key-lookup.h"
+ #include "defs-localdb.h"
+ 
+ 
+-
+ /* This functions construct a new C-string containing the absolute
+    path for the file, which is to expected to contain the public key
+    for the card identified by SERIALNO.  Returns proper error
+@@ -97,4 +97,6 @@ key_lookup_by_serialno (poldi_ctx_t ctx, const char *serialno, gcry_sexp_t *key)
+   return err;
+ }
+ 
++
++
+ 
+diff --git a/src/pam/auth-method-localdb/key-lookup.h b/src/pam/auth-method-localdb/key-lookup.h
+index a36615d..bae3834 100644
+--- a/src/pam/auth-method-localdb/key-lookup.h
++++ b/src/pam/auth-method-localdb/key-lookup.h
+@@ -1,18 +1,18 @@
+ /* key-lookup.c - Lookup keys for localdb authentication
+    Copyright (C) 2004, 2005, 2007, 2008 g10 Code GmbH
+- 
++
+    This file is part of Poldi.
+- 
++
+    Poldi is free software; you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 3 of the License, or
+    (at your option) any later version.
+- 
++
+    Poldi is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    General Public License for more details.
+- 
++
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, see
+    <http://www.gnu.org/licenses/>.  */
+diff --git a/src/pam/auth-method-x509/auth-x509.c b/src/pam/auth-method-x509/auth-x509.c
+index fafdc9e..ea8c756 100644
+--- a/src/pam/auth-method-x509/auth-x509.c
++++ b/src/pam/auth-method-x509/auth-x509.c
+@@ -38,7 +38,7 @@
+ #include "util/defs.h"
+ #include "util/simplelog.h"
+ #include "util/simpleparse.h"
+-
++#include "util/key-types.h"
+ 
+ 
+ struct x509_ctx_s
+@@ -198,6 +198,7 @@ verify_challenge_sig (poldi_ctx_t ctx, ksba_cert_t cert,
+ {
+   gcry_sexp_t pubkey;
+   gpg_error_t err;
++  key_types key_type = kType_rsa;
+ 
+   pubkey = NULL;
+ 
+@@ -205,7 +206,7 @@ verify_challenge_sig (poldi_ctx_t ctx, ksba_cert_t cert,
+   if (err)
+     goto out;
+ 
+-  err = challenge_verify (pubkey, challenge, challenge_n,
++  err = challenge_verify (pubkey, key_type, challenge, challenge_n,
+ 			  response, response_n);
+ 
+  out:
+@@ -472,6 +473,7 @@ auth_method_x509_auth_do (poldi_ctx_t ctx, x509_ctx_t cookie,
+   char *card_username;
+   ksba_cert_t cert;
+   dirmngr_ctx_t dirmngr;
++  key_types key_type;
+ 
+   dirmngr = NULL;
+   challenge = NULL;
+@@ -544,8 +546,8 @@ auth_method_x509_auth_do (poldi_ctx_t ctx, x509_ctx_t cookie,
+     }
+ 
+   /*** Generate challenge. ***/
+-
+-  err = challenge_generate (&challenge, &challenge_n);
++  key_type = kType_rsa;
++  err = challenge_generate (&challenge, &challenge_n, key_type);
+   if (err)
+     {
+       log_msg_error (ctx->loghandle, "failed to generate challenge: %s",
+@@ -554,7 +556,7 @@ auth_method_x509_auth_do (poldi_ctx_t ctx, x509_ctx_t cookie,
+     }
+ 
+   /*** Let card sign the challenge. ***/
+-  err = scd_pksign (ctx->scd, "OPENPGP.3",
++  err = scd_pksign (ctx->scd, "OPENPGP.3", key_type, 
+ 		    challenge, challenge_n,
+ 		    &response, &response_n);
+   if (err)
+diff --git a/src/pam/auth-support/Makefile.am b/src/pam/auth-support/Makefile.am
+index 9a47d73..b407188 100644
+--- a/src/pam/auth-support/Makefile.am
++++ b/src/pam/auth-support/Makefile.am
+@@ -33,7 +33,7 @@ PAM_MODULE_DIRECTORY = @PAM_MODULE_DIRECTORY@
+ 
+ AM_CFLAGS = \
+ 	-Wall -fPIC \
+-	 $(LIBGCRYPT_CFLAGS) $(GPG_ERROR_CFLAGS)
++	 $(LIBGCRYPT_CFLAGS) $(GPG_ERROR_CFLAGS) -lkeyutils
+ 
+ noinst_LIBRARIES = libpam-poldi-auth-support.a
+ 
+diff --git a/src/pam/auth-support/Makefile.in b/src/pam/auth-support/Makefile.in
+index 7486d0a..2c52384 100644
+--- a/src/pam/auth-support/Makefile.in
++++ b/src/pam/auth-support/Makefile.in
+@@ -332,7 +332,7 @@ AM_CPPFLAGS = -I$(top_srcdir)/src/pam/auth-support \
+ 	-DGNUPG_LIBEXECDIR="\"$(libexecdir)\""
+ AM_CFLAGS = \
+ 	-Wall -fPIC \
+-	 $(LIBGCRYPT_CFLAGS) $(GPG_ERROR_CFLAGS)
++	 $(LIBGCRYPT_CFLAGS) $(GPG_ERROR_CFLAGS) -lkeyutils
+ 
+ noinst_LIBRARIES = libpam-poldi-auth-support.a
+ libpam_poldi_auth_support_a_SOURCES = \
+diff --git a/src/pam/auth-support/getpin-cb.c b/src/pam/auth-support/getpin-cb.c
+index d06c50f..43a2c30 100644
+--- a/src/pam/auth-support/getpin-cb.c
++++ b/src/pam/auth-support/getpin-cb.c
+@@ -18,6 +18,7 @@
+    <http://www.gnu.org/licenses/>.  */
+ 
+ #include <poldi.h>
++#include <security/pam_modules.h>
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -32,6 +33,9 @@
+ #include <dirent.h>
+ #include <time.h>
+ 
++#include <sys/types.h>
++#include <keyutils.h>
++
+ #include <gcrypt.h>
+ 
+ #include "assuan.h"
+@@ -58,35 +62,85 @@ query_user (poldi_ctx_t ctx, const char *info, char *pin, size_t pin_size)
+   buffer = NULL;
+   rc = 0;
+ 
+-  while (1)			/* Loop until well-formed PIN retrieved. */
+-    {
+-      /* Retrieve PIN through PAM.  */
+-      rc = conv_ask (ctx->conv, 1, &buffer, info);
+-      if (rc)
+-	goto out;
+-
+-      /* Do some basic checks on the entered PIN. FIXME: hard-coded
+-	 values! Is this really the correct place for these checks?
+-	 Shouldn't they be done in scdaemon itself?  -mo */
+-
+-      if (strlen (buffer) < 6)	/* FIXME? is it really minimum of 6 bytes? */
+-	{
+-	  log_msg_error (ctx->loghandle, "PIN too short");
+-	  conv_tell (ctx->conv, "%s", _("PIN too short"));
++  //if pin is cached in kernel use it
++  key_serial_t sn = request_key("user", "pam-poldi-key", "Payload data", KEY_SPEC_PROCESS_KEYRING);
++
++  if (sn != -1)
++  {
++	  char *rtSecret = NULL;
++	  long rt_val = keyctl_read_alloc(sn, (void **) &rtSecret);
++
++	  if((rtSecret != NULL) && (rt_val != -1))
++	  {
++		  if (strlen (rtSecret) >= pin_size)
++		  {
++			  log_msg_error (ctx->loghandle, "PIN too long for buffer!");
++			  rc = gpg_error (GPG_ERR_INV_DATA); /* ? */
++			  goto out;
++		  }
++
++		  strncpy (pin, rtSecret, pin_size - 1);
++		  pin[pin_size-1] = 0;
++
++		  //overwrite password
++		  if( rtSecret != NULL)
++		  {
++			  wipestr(rtSecret);
++		  }
++		  //revoke key
++		  rt_val = keyctl_revoke(sn);
++		  if(rt_val == -1)
++		  {
++			  log_msg_error (ctx->loghandle, "Error Revoking pin from kernel key manager");
++		  }
+ 	}
+-      else
+-	break;
+-    }
+-
+-  if (strlen (buffer) >= pin_size)
+-    {
+-      log_msg_error (ctx->loghandle, "PIN too long for buffer!");
+-      rc = gpg_error (GPG_ERR_INV_DATA); /* ? */
+-      goto out;
+-    }
+-
+-  strncpy (pin, buffer, pin_size - 1);
+-  pin[pin_size-1] = 0;
++	  else
++	  {
++		  log_msg_error (ctx->loghandle, "Kernel key manager returned NULL");
++		  rc = gpg_error (GPG_ERR_INV_DATA); /* ? */
++		  goto out;
++	  }
++  }
++  else//request pin from user
++  {
++	  while (1)			/* Loop until well-formed PIN retrieved. */
++		{
++		  /* Retrieve PIN through PAM.  */
++		  rc = conv_ask (ctx->conv, 1, &buffer, info);
++		  if (rc)
++		goto out;
++
++		  /* Do some basic checks on the entered PIN. FIXME: hard-coded
++		 values! Is this really the correct place for these checks?
++		 Shouldn't they be done in scdaemon itself?  -mo */
++
++		if (strlen (buffer) < 6)	/* FIXME? is it really minimum of 6 bytes? */
++		{
++		  log_msg_error (ctx->loghandle, "PIN too short");
++		  conv_tell (ctx->conv, "%s", _("PIN too short"));
++		}
++		  else
++		break;
++		}
++
++	  if (strlen (buffer) >= pin_size)
++		{
++		  log_msg_error (ctx->loghandle, "PIN too long for buffer!");
++		  rc = gpg_error (GPG_ERR_INV_DATA); /* ? */
++		  goto out;
++		}
++
++	  strncpy (pin, buffer, pin_size - 1);
++	  pin[pin_size-1] = 0;
++
++	  //save key to kernel key manager
++	  long rt_val = add_key("user", "pam-poldi-key", buffer, strlen(buffer), KEY_SPEC_PROCESS_KEYRING);
++	  if(rt_val == -1)
++	  {
++		  log_msg_error (ctx->loghandle, "Error saving pin to the kernel key manager: %lx", rt_val);
++		  rc = gpg_error (GPG_ERR_INV_DATA);
++	  }
++  }
+ 
+  out:
+ 
+diff --git a/src/pam/auth-support/wait-for-card.c b/src/pam/auth-support/wait-for-card.c
+index b047fca..08409ab 100644
+--- a/src/pam/auth-support/wait-for-card.c
++++ b/src/pam/auth-support/wait-for-card.c
+@@ -50,7 +50,7 @@ wait_for_card (scd_context_t ctx, unsigned int timeout)
+       if (err == 0)
+ 	/* Card present!  */
+ 	break;
+-      else if (gpg_err_code (err) == GPG_ERR_CARD_NOT_PRESENT)
++      else if (gpg_err_code (err) == GPG_ERR_CARD_NOT_PRESENT || gpg_err_code (err))
+ 
+ 	{
+ 	  /* Card not present.  */
+diff --git a/src/pam/pam_poldi.c b/src/pam/pam_poldi.c
+index cb4cb3e..2899f19 100644
+--- a/src/pam/pam_poldi.c
++++ b/src/pam/pam_poldi.c
+@@ -1,18 +1,18 @@
+ /* pam_poldi.c - PAM authentication via OpenPGP smartcards.
+    Copyright (C) 2004, 2005, 2007, 2008, 2009 g10 Code GmbH
+- 
++
+    This file is part of Poldi.
+- 
++
+    Poldi is free software; you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 3 of the License, or
+    (at your option) any later version.
+- 
++
+    Poldi is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    General Public License for more details.
+- 
++
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, see
+    <http://www.gnu.org/licenses/>.  */
+@@ -29,7 +29,12 @@
+ #include <pwd.h>
+ #include <assert.h>
+ 
++#include <sys/types.h>
++#include <keyutils.h>
++
+ #define PAM_SM_AUTH
++#define PAM_SM_SESSION
++
+ #include <security/pam_modules.h>
+ #include <security/pam_appl.h>
+ 
+@@ -355,7 +360,7 @@ pam_sm_authenticate (pam_handle_t *pam_handle,
+ 		     int flags, int argc, const char **argv)
+ {
+   const void *conv_void;
+-  gpg_error_t err; 
++  gpg_error_t err;
+   poldi_ctx_t ctx;
+   conv_t conv;
+   scd_context_t scd_ctx;
+@@ -465,7 +470,7 @@ pam_sm_authenticate (pam_handle_t *pam_handle,
+     }
+ 
+   /*** Init authentication method.  ***/
+-  
++
+   if (auth_methods[ctx->auth_method].method->func_init)
+     {
+       err = (*auth_methods[ctx->auth_method].method->func_init) (&ctx->cookie);
+@@ -502,7 +507,7 @@ pam_sm_authenticate (pam_handle_t *pam_handle,
+       simpleparse_set_specs (method_parse,
+ 			     auth_methods[ctx->auth_method].method->opt_specs);
+ 
+-      err = simpleparse_parse_file (method_parse, 0, 
++      err = simpleparse_parse_file (method_parse, 0,
+ 				    auth_methods[ctx->auth_method].method->config);
+       if (err)
+ 	{
+@@ -519,6 +524,7 @@ pam_sm_authenticate (pam_handle_t *pam_handle,
+ 	goto out;
+     }
+ 
++
+   /*** Prepare PAM interaction.  ***/
+ 
+   /* Ask PAM for conv structure.  */
+@@ -548,8 +554,8 @@ pam_sm_authenticate (pam_handle_t *pam_handle,
+     }
+ 
+   /*** Check if we use gpg-agent. ***/
++  struct passwd *pw;
+   {
+-    struct passwd *pw;
+     pw = getpwuid (getuid ());
+ 
+     if (pw == NULL)
+@@ -571,7 +577,7 @@ pam_sm_authenticate (pam_handle_t *pam_handle,
+ 
+   err = scd_connect (&scd_ctx, use_agent,
+ 		     ctx->scdaemon_program, ctx->scdaemon_options,
+-		     ctx->loghandle);
++		     ctx->loghandle, ctx->pam_handle, pw);
+   if (err)
+     goto out;
+ 
+@@ -618,7 +624,7 @@ pam_sm_authenticate (pam_handle_t *pam_handle,
+ 		   ctx->cardinfo.serialno);
+ 
+   /*** Authenticate.  ***/
+-
++  char *username_authenticated = NULL;
+   if (pam_username)
+     {
+       /* Try to authenticate user as PAM_USERNAME.  */
+@@ -633,7 +639,7 @@ pam_sm_authenticate (pam_handle_t *pam_handle,
+       /* Try to authenticate user, choosing an identity is up to the
+ 	 user.  */
+ 
+-      char *username_authenticated = NULL;
++
+ 
+       if (!(*auth_methods[ctx->auth_method].method->func_auth) (ctx, ctx->cookie,
+ 								&username_authenticated))
+@@ -662,7 +668,7 @@ pam_sm_authenticate (pam_handle_t *pam_handle,
+   else
+     {
+       if (ctx->debug)
+-	log_msg_debug (ctx->loghandle, "authentication succeeded");
++	log_msg_debug (ctx->loghandle, "authentication succeeded for user");
+       if (ctx->modify_environment)
+ 	modify_environment (pam_handle, ctx);
+     }
+@@ -681,6 +687,386 @@ pam_sm_authenticate (pam_handle_t *pam_handle,
+   return err ? PAM_AUTH_ERR : PAM_SUCCESS;
+ }
+ 
++/*PAM SESSION*/
++int pam_sm_open_session(pam_handle_t *pam_handle, int flags, int argc, const char **argv)
++{
++	  const void *conv_void;
++	  gpg_error_t err;
++	  poldi_ctx_t ctx;
++	  conv_t conv;
++	  scd_context_t scd_ctx;
++	  int ret;
++	  const char *pam_username;
++	  struct auth_method_parse_cookie method_parse_cookie = { NULL, NULL };
++	  simpleparse_handle_t method_parse;
++	  struct getpin_cb_data getpin_cb_data;
++	  int use_agent = 0;
++
++	  pam_username = NULL;
++	  scd_ctx = NULL;
++	  conv = NULL;
++	  ctx = NULL;
++	  method_parse = NULL;
++	  err = GPG_ERR_NO_ERROR;
++
++
++
++
++
++	  bindtextdomain (PACKAGE, LOCALEDIR);
++
++	  /* Initialize Libgcrypt.  Disable secure memory for now; because of
++	     the implicit priviledge dropping, having secure memory enabled
++	     causes the following error:
++
++	     su: Authentication service cannot retrieve authentication
++	     info. */
++	  gcry_control (GCRYCTL_DISABLE_SECMEM);
++
++	  /*** Setup main context.  ***/
++
++	  err = create_context (&ctx, pam_handle);
++	  if (err)
++	    goto out;
++
++	  /* Setup logging prefix.  */
++	  log_set_flags (ctx->loghandle,
++			 LOG_FLAG_WITH_PREFIX | LOG_FLAG_WITH_TIME | LOG_FLAG_WITH_PID);
++	  log_set_prefix (ctx->loghandle, "Poldi");
++	  log_set_backend_syslog (ctx->loghandle);
++
++	  if (ctx->debug)
++	  {
++	  		log_msg_debug  (ctx->loghandle,"Setup Logging in session");
++	  }
++	  /*** Parse auth-method independent options.  ***/
++
++	  /* ... from configuration file:  */
++	  err = simpleparse_parse_file (ctx->parsehandle, 0, POLDI_CONF_FILE);
++	  if (err)
++	    {
++	      log_msg_error (ctx->loghandle,
++			     "failed to parse configuration file '%s': %s",
++			     POLDI_CONF_FILE,
++			     gpg_strerror (err));
++	      goto out;
++	    }
++
++	  /* ... and from argument vector provided by PAM: */
++	  if (argc)
++	    {
++	      err = simpleparse_parse (ctx->parsehandle, 0, argc, argv, NULL);
++	      if (err)
++		{
++		  log_msg_error (ctx->loghandle,
++				 "failed to parse PAM argument vector: %s",
++				 gpg_strerror (err));
++		  goto out;
++		}
++	    }
++
++	  /*** Initialize logging. ***/
++
++	  /* In case `logfile' has been set in the configuration file,
++	     initialize jnlib-logging the traditional file, loggin to the file
++	     (or socket special file) specified in the configuration file; in
++	     case `logfile' has NOT been set in the configuration file, log
++	     through Syslog.  */
++	  if (ctx->logfile)
++	    {
++	      gpg_error_t rc;
++
++	      rc = log_set_backend_file (ctx->loghandle, ctx->logfile);
++	      if (rc != 0)
++		/* Last try...  */
++		log_set_backend_syslog (ctx->loghandle);
++	    }
++
++	  //check for required  key stored by poldi auth
++	  key_serial_t sn = request_key("user", "pam-poldi-key", "Payload data", KEY_SPEC_PROCESS_KEYRING);
++	  if (sn == -1)
++	  {
++		  log_msg_error (ctx->loghandle, "Session quitting, Poldi Authentication did not run");
++		  err = GPG_ERR_GENERAL;
++		  goto out;
++	  }
++
++
++	  /*** Sanity checks. ***/
++
++
++	  	  /*** Basic initialization. ***/
++	  /* Authentication method to use must be specified.  */
++	  if (ctx->auth_method < 0)
++	    {
++	      log_msg_error (ctx->loghandle,
++			     "no authentication method specified");
++	      err = GPG_ERR_CONFIGURATION;
++	      goto out;
++	    }
++	  /* Authentication methods must provide a parser callback in case
++	     they have specific a configuration file.  */
++	  assert ((!auth_methods[ctx->auth_method].method->config)
++		  || (auth_methods[ctx->auth_method].method->parsecb
++		      && auth_methods[ctx->auth_method].method->opt_specs));
++
++	  if (ctx->debug)
++	    {
++	      log_msg_debug (ctx->loghandle,
++			     "using Session setup authentication method `%s'",
++			     auth_methods[ctx->auth_method].name);
++	    }
++	  /*** Init authentication method.  ***/
++
++	  if (auth_methods[ctx->auth_method].method->func_init)
++	    {
++	      err = (*auth_methods[ctx->auth_method].method->func_init) (&ctx->cookie);
++	      if (err)
++		{
++		  log_msg_error (ctx->loghandle,
++				 "failed to initialize authentication method %i: %s",
++				 -1, gpg_strerror (err));
++		  goto out;
++		}
++	    }
++	  if (auth_methods[ctx->auth_method].method->config)
++	    {
++	      /* Do auth-method specific parsing. */
++
++	      err = simpleparse_create (&method_parse);
++	      if (err)
++		{
++		  log_msg_error (ctx->loghandle,
++				 "failed to initialize parsing of configuration file for authentication method %s: %s",
++				 auth_methods[ctx->auth_method].name, gpg_strerror (err));
++		  goto out_parsing;
++		}
++	      method_parse_cookie.poldi_ctx = ctx;
++	      method_parse_cookie.method_ctx = ctx->cookie;
++
++	      simpleparse_set_loghandle (method_parse, ctx->loghandle);
++	      simpleparse_set_parse_cb (method_parse,
++					auth_methods[ctx->auth_method].method->parsecb,
++					&method_parse_cookie);
++	      simpleparse_set_i18n_cb (method_parse, i18n_cb, NULL);
++	      simpleparse_set_specs (method_parse,
++				     auth_methods[ctx->auth_method].method->opt_specs);
++
++	      err = simpleparse_parse_file (method_parse, 0,
++					    auth_methods[ctx->auth_method].method->config);
++	      if (err)
++		{
++		  log_msg_error (ctx->loghandle,
++				 "failed to parse configuration for authentication method %i: %s",
++				 auth_methods[ctx->auth_method].name, gpg_strerror (err));
++		  goto out_parsing;
++		}
++	    out_parsing:
++
++	      simpleparse_destroy (method_parse);
++	      if (err)
++		goto out;
++	    }
++
++	  /* Ask PAM for conv structure.  */
++	  ret = pam_get_item (ctx->pam_handle, PAM_CONV, &conv_void);
++	  if (ret != PAM_SUCCESS)
++	    {
++	      log_msg_error (ctx->loghandle,
++			     "failed to retrieve PAM conversation structure");
++	      err = GPG_ERR_INTERNAL;
++	      goto out;
++	    }
++
++	  /* Init conv subsystem by creating a conv_t object.  */
++	  err = conv_create (&conv, conv_void);
++	  if (err)
++	    goto out;
++
++	  ctx->conv = conv;
++
++//	  /*** Retrieve username from PAM.  ***/
++
++	  ret = pam_get_item (ctx->pam_handle, PAM_USER, (const void **)&pam_username);
++	  if (ret != PAM_SUCCESS)
++	  {
++	    /* It's not fatal, username can be in the card.  */
++	    log_msg_error (ctx->loghandle, "Can't retrieve username from PAM");
++	  }
++
++	  if (ctx->debug)
++	  {
++	  		log_msg_debug  (ctx->loghandle, "User Name: `%s'...", pam_username);
++	  }
++
++
++	  /*** Check if we can use gpg-agent. ***/
++	    struct passwd pwd, *result;
++	    char *buf = NULL;
++	    size_t bufsize;
++
++	    bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
++	    if (bufsize == -1)
++	    {
++	        bufsize = 16384;
++	    }
++
++
++	    //allocate and get users passwd strcut
++	    buf = (char*) malloc(bufsize);
++	  	ret = getpwnam_r(pam_username, &pwd, buf, bufsize, &result);
++
++	  	if(result == NULL || ret != 0)
++	  	{
++	  		free (buf);
++	  		log_msg_error (ctx->loghandle, "Can't retrieve user passwd struct from system");
++	  		goto out;
++	  	}
++	  	else
++	  	{
++	  		if (ctx->debug)
++	  		{
++	  			log_msg_debug (ctx->loghandle, "Retrieved user passwd struct from system");
++	  		}
++	  	}
++
++	  	//set user agent to start scd under user
++	  	use_agent = 2;
++
++	  /*** Connect to Scdaemon. ***/
++	  err = scd_connect (&scd_ctx, use_agent, ctx->scdaemon_program, ctx->scdaemon_options, ctx->loghandle, ctx->pam_handle, result);
++	  if (err)
++	  {
++	    goto out;
++	  }
++
++	  ctx->scd = scd_ctx;
++
++	  /* Install PIN retrival callback. */
++	  getpin_cb_data.poldi_ctx = ctx;
++	  scd_set_pincb (ctx->scd, getpin_cb, &getpin_cb_data);
++
++
++	  /*** Wait for card insertion.  ***/
++
++	  if (pam_username)
++	  {
++		  if (ctx->debug)
++		  {
++			  log_msg_debug (ctx->loghandle, "Waiting for card for user `%s'...", pam_username);
++		  }
++
++		  if (!ctx->quiet)
++		  {
++			  conv_tell (ctx->conv, _("Insert authentication card for user `%s'"), pam_username);
++		  }
++	  }
++	  else
++	  {
++		  if (ctx->debug)
++	      {
++			  log_msg_debug (ctx->loghandle, "Waiting for card...");
++	      }
++	      if (!ctx->quiet)
++	      {
++	    	  conv_tell (ctx->conv, _("Insert authentication card"));
++	      }
++	    }
++
++	  err = wait_for_card (ctx->scd, 0);
++	  if (err)
++	    {
++	      log_msg_error (ctx->loghandle, "failed to wait for card insertion: %s",gpg_strerror (err));
++	      goto out;
++	    }
++
++	  /*** Receive card info. ***/
++
++	  err = scd_learn (ctx->scd, &ctx->cardinfo);
++	  if (err)
++	    goto out;
++
++	  if (ctx->debug)
++	  {
++	    log_msg_debug (ctx->loghandle,
++			   "connected to card; serial number is: %s",
++			   ctx->cardinfo.serialno);
++	  }
++
++
++	  /*** Authenticate.  ***/
++
++	  if (pam_username)
++	    {
++			  /* Try to authenticate user as PAM_USERNAME.  */
++
++			  if (!(*auth_methods[ctx->auth_method].method->func_auth_as) (ctx, ctx->cookie,
++										   pam_username))
++			/* Authentication failed.  */
++			err = GPG_ERR_GENERAL;
++	    }
++	  else
++	    {
++			  /* Try to authenticate user, choosing an identity is up to the
++			 user.  */
++
++			  char *username_authenticated = NULL;
++
++			  if (!(*auth_methods[ctx->auth_method].method->func_auth) (ctx, ctx->cookie,
++										&username_authenticated))
++			/* Authentication failed.  */
++			err = GPG_ERR_GENERAL;
++			  else
++			{
++			  /* Send username received during authentication process back
++				 to PAM.  */
++			  ret = pam_set_item (ctx->pam_handle, PAM_USER,
++						  username_authenticated);
++			  if (ret == PAM_SUCCESS)
++				err = 0;
++			  else
++				err = gpg_error (GPG_ERR_INTERNAL);
++
++			  xfree (username_authenticated);
++			}
++	    }
++
++	 out:
++//
++	//  /* Log result.  */
++	  if (err)
++	  {
++		  log_msg_error (ctx->loghandle, "Session setup failed: %s", gpg_strerror (err));
++	  }
++	  else
++	    {
++	      if (ctx->debug)
++	      {
++	    	  log_msg_debug (ctx->loghandle, "Session setup succeeded");
++	      }
++	      if (ctx->modify_environment)
++	      {
++	    	  modify_environment (pam_handle, ctx);
++	      }
++	    }
++
++	  /* Call authentication method's deinit callback. */
++	  if ((ctx->auth_method >= 0)
++	      && auth_methods[ctx->auth_method].method->func_deinit)
++	    (*auth_methods[ctx->auth_method].method->func_deinit) (ctx->cookie);
++
++	  /* FIXME, cosmetics? */
++	  conv_destroy (conv);
++	  destroy_context (ctx);
++
++	  /* Return to PAM.  */
++	  return PAM_SUCCESS;
++}
++
++int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc, const char **argv) {
++    return PAM_SUCCESS;
++}
++
+ /* PAM's `set-credentials' interface.  */
+ PAM_EXTERN int
+ pam_sm_setcred (pam_handle_t *pam_handle,
+diff --git a/src/scd/scd.c b/src/scd/scd.c
+index 5d1b835..76f1191 100644
+--- a/src/scd/scd.c
++++ b/src/scd/scd.c
+@@ -1,24 +1,25 @@
+ /* scd.c - Interface to Scdaemon
+    Copyright (C) 2001, 2002, 2005 Free Software Foundation, Inc.
+-   Copyright (C) 2007, 2008, 2009 g10code GmbH. 
++   Copyright (C) 2007, 2008, 2009 g10code GmbH.
+ 
+    This file is part of Poldi.
+- 
++
+    Poldi is free software; you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 3 of the License, or
+    (at your option) any later version.
+- 
++
+    Poldi is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    General Public License for more details.
+- 
++
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, see
+    <http://www.gnu.org/licenses/>.  */
+ 
+ #include <poldi.h>
++#include <security/pam_modules.h>
+ 
+ #include <errno.h>
+ #include <stdio.h>
+@@ -31,6 +32,7 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <sys/wait.h>
++#include <fcntl.h>
+ 
+ #include <gpg-error.h>
+ #include <gcrypt.h>
+@@ -48,7 +50,11 @@
+ #define MAX_OPEN_FDS 20
+ #endif
+ 
+-
++#define READ_END 0
++#define WRITE_END 1
++
++#define TRUE 1
++#define FALSE 0
+ 
+ /* Initializer objet for struct scd_cardinfo instances.  */
+ struct scd_cardinfo scd_cardinfo_null;
+@@ -75,7 +81,7 @@ struct learn_parm_s
+   void *sinfo_cb_arg;
+ };
+ 
+-struct inq_needpin_s 
++struct inq_needpin_s
+ {
+   scd_context_t ctx;
+   int (*getpin_cb)(void *, const char *, char*, size_t);
+@@ -112,7 +118,7 @@ get_agent_socket_name (char **gpg_agent_sockname)
+ 
+   /* It is good if we have popen with execv (no SHELL) */
+   input = popen (GNUPG_DEFAULT_GPGCONF " --list-dirs agent-socket", "r");
+-  if (input == NULL)
++  if (input == (void*) NULL)
+     {
+       xfree (result);
+       return gpg_error (GPG_ERR_NOT_FOUND);
+@@ -135,6 +141,45 @@ get_agent_socket_name (char **gpg_agent_sockname)
+   return err;
+ }
+ 
++/* Get the bindir of GPG-AGENT by gpgconf. */
++static gpg_error_t get_agent_bin_dir (char **gpg_agent_bindir)
++{
++  gpg_error_t err = 0;
++  FILE *input;
++  char *result;
++  size_t len;
++
++  *gpg_agent_bindir = NULL;
++
++  result = xtrymalloc (256);
++  if (!result)
++    return gpg_error_from_syserror ();
++
++  /* It is good if we have popen with execv (no SHELL) */
++  input = popen (GNUPG_DEFAULT_GPGCONF " --list-dirs bindir", "r");
++  if (input == (void*) NULL)
++    {
++      xfree (result);
++      return gpg_error (GPG_ERR_NOT_FOUND);
++    }
++
++  len = fread (result, 1, 256, input);
++  fclose (input);
++
++  if (len)
++    {
++      *gpg_agent_bindir = result;
++      result[len-1] = 0;	/* Chop off the newline.  */
++    }
++  else
++    {
++      xfree (result);
++      err =  gpg_error (GPG_ERR_NOT_FOUND);
++    }
++
++  return err;
++}
++
+ /* Helper function for get_scd_socket_from_agent(), which is used by
+    scd_connect().
+ 
+@@ -214,13 +259,13 @@ restart_scd (scd_context_t ctx)
+    zero on success.  */
+ gpg_error_t
+ scd_connect (scd_context_t *scd_ctx, int use_agent, const char *scd_path,
+-	     const char *scd_options, log_handle_t loghandle)
++	     const char *scd_options, log_handle_t loghandle, pam_handle_t *pam_handle, struct passwd *pw)
+ {
+   assuan_context_t assuan_ctx;
+   scd_context_t ctx;
+-  gpg_error_t err;
+-
+-  assuan_ctx = NULL;
++  gpg_error_t err = 0;
++  int rt_val = 0;
++  size_t buff_size = 512;
+ 
+   if (fflush (NULL))
+     {
+@@ -232,13 +277,149 @@ scd_connect (scd_context_t *scd_ctx, int use_agent, const char *scd_path,
+ 
+   ctx = xtrymalloc (sizeof (*ctx));
+   if (!ctx)
+-    return gpg_error_from_syserror ();
+-
++  {
++	  return gpg_error_from_syserror ();
++  }
+   ctx->assuan_ctx = NULL;
+   ctx->flags = 0;
+ 
++  if (use_agent == 2)
++    {
++	  char *scd_socket_name = NULL;
++	  char *gpg_bin_dir = NULL;
++	  char  gpg_connect_agent[buff_size];
++	  char *connect_agent = "gpg-connect-agent";
++
++	  err = get_agent_bin_dir(&gpg_bin_dir);
++	  if(err)
++	  {
++		  return err;
++	  }
++
++	  //if not enough room to copy string
++	  if(strlen(gpg_bin_dir) > (buff_size + strlen(connect_agent)+1))
++	  {
++		  return GPG_ERR_GENERAL;
++	  }
++
++	  strcpy(gpg_connect_agent, gpg_bin_dir);
++	  strcat(gpg_connect_agent, "/gpg-connect-agent");
++
++	  const char *cmd_start_gpg[] = {gpg_connect_agent, "learn", "/bye", NULL};
++	  const char *cmd_start_gpg_tty[] = {gpg_connect_agent, "UPDATESTARTUPTTY", "/bye", NULL};
++
++	  int input;
++	  char **env = pam_getenvlist(pam_handle);
++
++	  //start gpg as user
++	  run_as_user(pw, loghandle, cmd_start_gpg, &input, env);
++	  waitpid(-1, &rt_val, 0);
++	  if (input < 0 || rt_val == EXIT_FAILURE)
++	  {
++		  return GPG_ERR_GENERAL;
++	  }
++
++	  //setup gpg tty under user, needed for using gpg-agent ssh with pinentry-qt
++	  run_as_user(pw, loghandle, cmd_start_gpg_tty, &input, env);
++	  waitpid(-1, &rt_val, 0);
++	  if (input < 0 || rt_val == EXIT_FAILURE)
++	  {
++		  return GPG_ERR_GENERAL;
++	  }
++
++	  if (env != NULL)
++	  {
++	      free(env);
++	  }
++
++	  int fd[2];
++	  size_t maxBuffSize=1024;
++	  char pipe_buff[maxBuffSize];
++
++	  // create pipe descriptors
++	  rt_val = pipe(fd);
++	  if (rt_val == -1)
++	  {
++		  return GPG_ERR_GENERAL;
++	  }
++
++	  int frk_val = fork();
++
++	  if (frk_val != 0)
++	  {
++		  //parent process reading only, close write descriptor
++		  close_safe(fd[1], loghandle);
++		  //read data from child
++		  rt_val = read(fd[0], pipe_buff, maxBuffSize);
++		  if (rt_val == -1)
++		  {
++			  return GPG_ERR_GENERAL;
++		  }
++		  //close read
++		  close_safe(fd[0], loghandle);
++	  }
++	  else//child process
++	  {
++		  close_safe(fd[0], loghandle);
++
++		  //switch to user process
++		  rt_val = setgid(pw->pw_gid);
++		  if(rt_val == -1)
++		  {
++			  exit(-1);
++		  }
++
++		  rt_val = setuid(pw->pw_uid);
++		  if(rt_val == -1)
++		  {
++			  exit(-1);
++		  }
++
++		  get_scd_socket_from_agent (&scd_socket_name);
++
++		  //close read pipe
++		  if(scd_socket_name != NULL)
++		  {
++			  strcpy(pipe_buff, scd_socket_name);
++		  }
++		  //get gpg socket path
++		  err = write(fd[1], pipe_buff, maxBuffSize);
++		  if(err == -1)
++		  {
++			  exit(-1);
++		  }
++
++		  //close write and exit
++		  close_safe(fd[1], loghandle);
++		  exit(0);
++	  }
++	  //wait for child to finish
++	  waitpid(frk_val, &rt_val, 0);
++
++	  //if child exited on error
++	  if(rt_val == -1)
++	  {
++		  return GPG_ERR_GENERAL;
++	  }
++	  scd_socket_name=pipe_buff;
++
++	  //connect to users scdeamon socket
++	  err = assuan_socket_connect (&assuan_ctx, scd_socket_name, 0);
++
++	  if (!err)
++	  {
++		  log_msg_debug (loghandle,
++		   "got scdaemon socket name from users gpg-agent, "
++	  		       "connected to socket '%s'", scd_socket_name);
++	  }
++	  else
++	  {
++		  log_msg_debug (loghandle, "Error getting scdaemon socket during session setup: %s", scd_socket_name);
++	  }
++  }
++
+   /* Try using scdaemon under gpg-agent.  */
+-  if (use_agent)
++  if (use_agent == 1)
+     {
+       char *scd_socket_name = NULL;
+ 
+@@ -261,13 +442,15 @@ scd_connect (scd_context_t *scd_ctx, int use_agent, const char *scd_path,
+   /* If scdaemon under gpg-agent is irrelevant or not available,
+    * let Poldi invoke scdaemon.
+    */
+-  if (!use_agent || err)
++  if ((use_agent==0) || (err && use_agent != 2))
+     {
+       const char *pgmname;
+       const char *argv[5];
+       int no_close_list[3];
+       int i;
+ 
++      assuan_ctx = NULL;
++
+       if (!scd_path || !*scd_path)
+         scd_path = GNUPG_DEFAULT_SCD;
+       if (!(pgmname = strrchr (scd_path, '/')))
+@@ -323,7 +506,9 @@ scd_connect (scd_context_t *scd_ctx, int use_agent, const char *scd_path,
+     {
+       /* FIXME: is this the best way?  -mo */
+       //reset_scd (assuan_ctx);
+-      scd_serialno_internal (assuan_ctx, NULL);
++
++	  char *card_sn = NULL;
++      err = scd_serialno_internal (assuan_ctx, &card_sn);
+ 
+       ctx->assuan_ctx = assuan_ctx;
+       ctx->flags = 0;
+@@ -375,7 +560,7 @@ unescape_status_string (const char *s)
+   while (*s)
+     {
+       if (*s == '%' && s[1] && s[2])
+-        { 
++        {
+           s++;
+           *d = xtoi_2 (s);
+           if (!*d)
+@@ -391,7 +576,7 @@ unescape_status_string (const char *s)
+       else
+         *d++ = *s++;
+     }
+-  *d = 0; 
++  *d = 0;
+   return buffer;
+ }
+ 
+@@ -490,7 +675,7 @@ learn_status_cb (void *opaque, const char *line)
+       else if (no == 3)
+         parm->fpr3valid = unhexify_fpr (line, parm->fpr3);
+     }
+-  
++
+   return 0;
+ }
+ 
+@@ -605,7 +790,7 @@ membuf_data_cb (void *opaque, const void *buffer, size_t length)
+     put_membuf (data, buffer, length);
+   return 0;
+ }
+-  
++
+ /* Handle the NEEDPIN inquiry. */
+ static int
+ inq_needpin (void *opaque, const char *line)
+@@ -628,7 +813,7 @@ inq_needpin (void *opaque, const char *line)
+       line += 7;
+       while (*line == ' ')
+         line++;
+-      
++
+       pinlen = 90;
+       pin = xtrymalloc_secure (pinlen);
+       if (!pin)
+@@ -654,7 +839,7 @@ inq_needpin (void *opaque, const char *line)
+       line += 17;
+       while (*line == ' ')
+         line++;
+-      
++
+       rc = parm->getpin_cb (parm->getpin_cb_arg, line, NULL, 1);
+     }
+   else if (!strncmp (line, "DISMISSPINPADPROMPT", 19)
+@@ -688,11 +873,12 @@ inq_needpin (void *opaque, const char *line)
+    the PIN, GETPIN_CB_ARG is passed as opaque argument to
+    GETPIN_CB. INDATA/INDATALEN is the input for the signature
+    function.  The signature created is written into newly allocated
+-   memory in *R_BUF, *R_BUFLEN will hold the length of the
++   memory in *R_BUF, *S_BUF, *R_BUFLEN, S_BUFLEN will hold the length of the
+    signature. */
+ gpg_error_t
+ scd_pksign (scd_context_t ctx,
+ 	    const char *keyid,
++      key_types key_type,
+ 	    const unsigned char *indata, size_t indatalen,
+ 	    unsigned char **r_buf, size_t *r_buflen)
+ {
+@@ -703,6 +889,7 @@ scd_pksign (scd_context_t ctx,
+   size_t len;
+   unsigned char *sigbuf;
+   size_t sigbuflen;
++  const char * hashAlgo;
+ 
+   *r_buf = NULL;
+   *r_buflen = 0;
+@@ -735,9 +922,25 @@ scd_pksign (scd_context_t ctx,
+   inqparm.getpin_cb = ctx->pincb;
+   inqparm.getpin_cb_arg = ctx->pincb_cookie;
+ 
+-  /* Go, sign it. */
+ 
+-  snprintf (line, DIM(line)-1, "PKSIGN %s", keyid);
++  //set hash type based on
++  switch (key_type)
++  {
++    case kType_rsa:
++      hashAlgo = "--hash=sha256";
++      break;
++
++    case kType_ecc_Ed25519:
++      hashAlgo = "";//default is sha512, setting that here causes scd to generate an invalid SIG
++      break;
++
++    default:
++      rc = -1;
++      goto out;
++  }//switch
++
++  /* Go, sign it. */
++  snprintf (line, DIM(line)-1, "PKSIGN %s %s",hashAlgo, keyid);
+   line[DIM(line)-1] = 0;
+   rc = assuan_transact (ctx->assuan_ctx, line,
+                         membuf_data_cb, &data,
+@@ -760,7 +963,7 @@ scd_pksign (scd_context_t ctx,
+     }
+ 
+   memcpy (p, sigbuf, sigbuflen);
+-  
++
+  out:
+ 
+   xfree (get_membuf (&data, &len));
+@@ -816,7 +1019,7 @@ scd_readkey (scd_context_t ctx,
+  out:
+ 
+   xfree (buffer);
+-    
++
+   return rc;
+ }
+ 
+@@ -872,4 +1075,110 @@ scd_getinfo (scd_context_t ctx, const char *what, char **result)
+   return rc;
+ }
+ 
++
++int run_as_user(const struct passwd *user, log_handle_t loghandle, const char * const cmd[], int *input, char **env)
++{
++    int inp[2] = {-1, -1};
++    int pid;
++    int dev_null;
++    int rt_val;
++
++    if (pipe(inp) < 0)
++    {
++        *input = -1;
++        return 0;
++    }
++
++    *input = inp[WRITE_END];
++
++    pid = fork();
++
++    switch (pid)
++    {
++    case -1:
++        close_safe(inp[READ_END], loghandle);
++        close_safe(inp[WRITE_END], loghandle);
++        *input = -1;
++        return FALSE;
++
++    case 0:
++        break;
++
++    default:
++        close_safe(inp[READ_END], loghandle);
++        return pid;
++    }
++
++    //in child process
++
++    rt_val = dup2(inp[READ_END], STDIN_FILENO);
++    if ( rt_val == -1 )
++    {
++        exit(EXIT_FAILURE);
++    }
++
++    close_safe(inp[READ_END], loghandle);
++    close_safe(inp[WRITE_END], loghandle);
++
++    //attempt to link stdout and stderr to /dev/null if it exist
++    dev_null = open("/dev/null", O_WRONLY);
++    if ( dev_null != -1)
++    {
++        rt_val = dup2(dev_null, STDOUT_FILENO);
++        if(rt_val == -1)
++        {
++        	exit(EXIT_FAILURE);
++        }
++
++        rt_val = dup2(dev_null, STDERR_FILENO);
++        if(rt_val == -1)
++		{
++			exit(EXIT_FAILURE);
++		}
++
++        rt_val = close(dev_null);
++        if(rt_val == -1)
++		{
++			exit(EXIT_FAILURE);
++		}
++    }
++
++    if (seteuid(getuid()) < 0 || setegid(getgid()) < 0 ||
++        setgid(user->pw_gid) < 0 || setuid(user->pw_uid) < 0 ||
++        setegid(user->pw_gid) < 0 || seteuid(user->pw_gid) < 0)
++    {
++        exit(EXIT_FAILURE);
++    }
++
++    if (env != NULL)
++    {
++        execve(cmd[0], (char * const *) cmd, env);
++    }
++    else
++    {
++        execv(cmd[0], (char * const *) cmd);
++    }
++
++    exit(EXIT_SUCCESS);
++}
++
++void close_safe(int fd, log_handle_t loghandle)
++{
++     int rt = close(fd);
++     errno = 0;
++
++     if(rt == -1)
++     {
++    	 if(errno != 0)
++    	 {
++    		 log_msg_error (loghandle, "Error Closing file descriptor: %s\n", strerror(errno));
++    	 }
++    	 else
++    	 {
++    		 log_msg_error (loghandle, "Error Closing file descriptor\n");
++    	 }
++
++     }
++
++}
+ /* END */
+diff --git a/src/scd/scd.h b/src/scd/scd.h
+index 8910497..c1d4f2a 100644
+--- a/src/scd/scd.h
++++ b/src/scd/scd.h
+@@ -1,18 +1,18 @@
+ /* scd.h - Interface to Scdaemon
+-   Copyright (C) 2007, 2008, 2009 g10code GmbH. 
++   Copyright (C) 2007, 2008, 2009 g10code GmbH.
+ 
+    This file is part of Poldi.
+- 
++
+    Poldi is free software; you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 3 of the License, or
+    (at your option) any later version.
+- 
++
+    Poldi is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    General Public License for more details.
+- 
++
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, see
+    <http://www.gnu.org/licenses/>.  */
+@@ -22,7 +22,12 @@
+ 
+ #include <poldi.h>
+ 
++#include <pwd.h>
++#include <security/pam_modules.h>
++#include <security/pam_appl.h>
++
+ #include "util/simplelog.h"
++#include "util/key-types.h"
+ 
+ struct scd_context;
+ 
+@@ -43,15 +48,20 @@ struct scd_cardinfo
+   char fpr3[20];
+ };
+ 
++struct userinfo {
++    int uid, gid;
++    char *home;
++};
++
+ typedef struct scd_cardinfo scd_cardinfo_t;
+ 
+ #define SCD_FLAG_VERBOSE (1 << 0)
+ 
+ /* Fork it off and work by pipes.  Returns proper error code or zero
+    on success.  */
+-gpg_error_t scd_connect (scd_context_t *scd_ctx, int use_agent,
+-			 const char *scd_path, const char *scd_options,
+-			 log_handle_t loghandle);
++gpg_error_t
++scd_connect (scd_context_t *scd_ctx, int use_agent, const char *scd_path,
++	     const char *scd_options, log_handle_t loghandle, pam_handle_t *pam_handle, struct passwd *pw);
+ 
+ /* Disconnect from SCDaemon; destroy the context SCD_CTX.  */
+ void scd_disconnect (scd_context_t scd_ctx);
+@@ -81,6 +91,7 @@ void scd_release_cardinfo (struct scd_cardinfo cardinfo);
+    *R_BUF, *R_BUFLEN will hold the length of the signature. */
+ gpg_error_t scd_pksign (scd_context_t ctx,
+ 			const char *keyid,
++      key_types key_type,
+ 			const unsigned char *indata, size_t indatalen,
+ 			unsigned char **r_buf, size_t *r_buflen);
+ 
+@@ -97,4 +108,7 @@ int scd_getinfo (scd_context_t ctx, const char *what, char **result);
+ /* Initializer objet for struct scd_cardinfo instances.  */
+ extern struct scd_cardinfo scd_cardinfo_null;
+ 
++int run_as_user(const struct passwd *user, log_handle_t loghandle, const char * const cmd[], int *input, char **env);
++void close_safe(int fd, log_handle_t loghandle);
++
+ #endif
+diff --git a/src/util/Makefile.am b/src/util/Makefile.am
+index 72cf95e..6f2e93d 100644
+--- a/src/util/Makefile.am
++++ b/src/util/Makefile.am
+@@ -11,7 +11,7 @@
+ # ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ # or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
+ # License for more details.
+-# 
++#
+ # You should have received a copy of the GNU General Public License
+ # along with this program; if not, write to the Free Software
+ # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
+@@ -31,7 +31,9 @@ poldi_util_SOURCES = \
+ 	convert.c \
+ 	simplelog.c simplelog.h \
+ 	simpleparse.c simpleparse.h \
+-	filenames.c filenames.h
++	filenames.c filenames.h \
++	key-types.c key-types.h \
++	debugTools.c debugTools.h
+ 
+ poldi_util_CFLAGS = \
+ 	-Wall \
+diff --git a/src/util/debugTools.c b/src/util/debugTools.c
+new file mode 100644
+index 0000000..6269909
+--- /dev/null
++++ b/src/util/debugTools.c
+@@ -0,0 +1,95 @@
++#include "debugTools.h"
++#include <string.h>
++
++void sprintSEXP_Ed25519(gcry_sexp_t in, char *rt, size_t strSize)
++{
++  size_t rsaBuff_n;
++  char *rsaBuff;
++  char btmpStr[10];
++  char tmpStr[10];
++
++  //allocate buffer memory
++  rsaBuff_n = gcry_sexp_sprint(in, GCRYSEXP_FMT_CANON, NULL, 0);
++  rsaBuff = calloc(1, rsaBuff_n);
++  if(!rsaBuff){printf("Error Allocating Dynamic Memory\n");}
++  //printf("Buffer Size: %zu\n", rsaBuff_n);
++  gcry_sexp_sprint(in, GCRYSEXP_FMT_CANON, rsaBuff, rsaBuff_n);
++
++  int k = 0;
++  char strByteSize[10];
++  int byteSize = 0;
++  int val;
++
++  for(int i=0; i != rsaBuff_n; i++) {
++    if(rsaBuff[i] == '1')
++      {
++	k = i + 1;
++	strByteSize[0] = 0;
++	byteSize = 0;
++
++	if(k <= rsaBuff_n)
++	  {
++	  if(rsaBuff[k] == ':')
++	  {
++	    //read 1
++	    addCToStr(rsaBuff[i], rt, strSize);
++	    i++;
++
++	    //read :
++	    addCToStr(rsaBuff[i], rt, strSize);
++	    i++;
++
++	    //read control char
++	    addCToStr(rsaBuff[i], rt, strSize);
++	    i++;
++
++	    //read in byte size :
++	    while(rsaBuff[i] != ':')
++	    {
++	      addCToStr(rsaBuff[i], strByteSize, 10);
++	      addCToStr(rsaBuff[i], rt, strSize);
++	      i++;
++	    }//while
++
++	    byteSize = atoi(strByteSize);
++
++	    //read in second :
++	    addCToStr(rsaBuff[i], rt, strSize);
++	    i++;
++
++	    //iterate through each byte
++	    for(int j=0; j != byteSize; j++) {
++
++	      val = (unsigned char)rsaBuff[i];
++	      sprintf(tmpStr,"%X",val);
++
++	      //need traling zero
++	      if(strlen(tmpStr) < 2) {
++		strcpy(btmpStr, tmpStr);
++
++		tmpStr[0]='0';
++		tmpStr[1]=0;
++		strcat(tmpStr,btmpStr);
++	      }
++	      strcat(rt, tmpStr);
++	      i++;
++	       }//for
++       }//if
++     }//if
++   }//if key type
++
++    addCToStr(rsaBuff[i], rt, strSize);
++  }//for
++}//sprintSEXP_Ed25519
++
++
++
++void addCToStr(char c, char *in, size_t maxStrLn)
++{
++  int endOfStr = strlen(in);
++  if(endOfStr+1 >= maxStrLn){return;}
++
++  in[endOfStr] = c;
++  endOfStr++;
++  in[endOfStr] = 0;
++}
+diff --git a/src/util/debugTools.h b/src/util/debugTools.h
+new file mode 100644
+index 0000000..dd0d171
+--- /dev/null
++++ b/src/util/debugTools.h
+@@ -0,0 +1,8 @@
++#include <gcrypt.h>
++#ifndef DEBUGTOOLS_H
++#define DEBUGTOOLS_H
++
++void sprintSEXP_Ed25519(gcry_sexp_t in, char *rt, size_t strSize);
++void addCToStr(char c, char *in, size_t maxStrLn);
++
++#endif
+diff --git a/src/util/key-types.c b/src/util/key-types.c
+new file mode 100644
+index 0000000..31ad47b
+--- /dev/null
++++ b/src/util/key-types.c
+@@ -0,0 +1,69 @@
++#include "key-types.h"
++
++/* Lookup key type ex, rsa, ecc, returns 1 on error and 0 otherwise
++   Currenly Only Supporting rsa and ed25519*/
++int get_key_type(key_types *key_type, gcry_sexp_t key) {
++  int err = 0;
++  size_t strCnt = 0;
++  size_t maxBuffSize = 4098;
++  char strbuff[maxBuffSize];
++  char *token;
++
++  if(key == NULL) {
++    return 1;
++  }//if
++
++  strCnt = gcry_sexp_sprint(key, GCRYSEXP_FMT_DEFAULT, strbuff, maxBuffSize);
++  if(strCnt == 0) {
++    return 1;
++  }//if
++
++
++  //parse key type from S Expression
++  token = strtok(strbuff, "\n");
++  token = strtok(NULL, ":");
++  token = strtok(NULL, "\n");
++
++  //if rsa key
++  err = strcmp(token, "rsa");
++  if(err == 0)
++  {
++    *key_type = kType_rsa;
++    return 0;
++  }//if
++
++  //if ecc key
++  err = strcmp(token, "ecc");
++  if(err == 0)
++  {
++    //get flag type
++    token = strtok(NULL, "\n");
++    token = strtok(NULL, ":");
++    token = strtok(NULL, ":");
++    token = strtok(NULL, ")");
++
++    err = strcmp(token, "eddsa");
++    if(err == 0)
++    {
++      *key_type = kType_ecc_Ed25519;
++      return 0;
++    }//if
++
++  }//if
++
++
++  return 1;
++}//key_type
++
++/* Returns the String Value of the key type
++   Returns Empty String on error*/
++const char* key_type_to_str(key_types key_type)
++{
++  switch (key_type)
++  {
++    case kType_rsa: return "rsa";
++    case kType_ecc_Ed25519: return "Ed25519";
++  }
++
++  return "";
++}
+diff --git a/src/util/key-types.h b/src/util/key-types.h
+new file mode 100644
+index 0000000..8b30e5e
+--- /dev/null
++++ b/src/util/key-types.h
+@@ -0,0 +1,15 @@
++
++#include <gcrypt.h>
++
++#ifndef KEY_TYPES_H
++#define KEY_TYPES_H
++
++typedef enum{kType_rsa, kType_ecc_Ed25519} key_types;
++
++/* Get Key Type*/
++int get_key_type(key_types *key_type, gcry_sexp_t key);
++
++/* returns key type string value*/
++const char* key_type_to_str(key_types key_type);
++
++#endif
+diff --git a/src/util/support.c b/src/util/support.c
+index 8e576c6..4bb5c6b 100644
+--- a/src/util/support.c
++++ b/src/util/support.c
+@@ -1,18 +1,18 @@
+ /* support.c - PAM authentication via OpenPGP smartcards.
+    Copyright (C) 2004, 2005, 2007, 2008 g10 Code GmbH
+- 
++
+    This file is part of Poldi.
+-  
++
+    Poldi is free software; you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+-  
++
+    Poldi is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    General Public License for more details.
+-  
++
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
+@@ -38,7 +38,7 @@
+ #include "support.h"
+ #include "defs.h"
+ 
+-#define CHALLENGE_MD_ALGORITHM GCRY_MD_SHA1
++
+ 
+ 
+ 
+@@ -50,11 +50,23 @@
+    it's length in bytes is to be stored in *CHALLENGE_N.  Returns
+    proper error code.  */
+ gpg_error_t
+-challenge_generate (unsigned char **challenge, size_t *challenge_n)
++challenge_generate (unsigned char **challenge, size_t *challenge_n, key_types key_type)
+ {
+   gpg_error_t err = GPG_ERR_NO_ERROR;
+   unsigned char *challenge_new = NULL;
+-  size_t challenge_new_n = gcry_md_get_algo_dlen (CHALLENGE_MD_ALGORITHM);
++  size_t challenge_new_n = 0; //gcry_md_get_algo_dlen (CHALLENGE_MD_ALGORITHM);
++
++  //determine challange size based on hashing algorithm
++  switch (key_type)
++  {
++    case kType_rsa:
++      challenge_new_n = gcry_md_get_algo_dlen (GCRY_MD_SHA256);
++      break;
++
++    case kType_ecc_Ed25519:
++      challenge_new_n = gcry_md_get_algo_dlen (GCRY_MD_SHA512);
++      break;
++  }//switch
+ 
+   challenge_new = xtrymalloc (challenge_new_n);
+   if (! challenge_new)
+@@ -79,31 +91,58 @@ challenge_release (unsigned char *challenge)
+ }
+ 
+ static gpg_error_t
+-challenge_verify_sexp (gcry_sexp_t sexp_key,
++challenge_verify_sexp (gcry_sexp_t sexp_key, key_types key_type,
+ 		       unsigned char *challenge, size_t challenge_n,
+ 		       unsigned char *response, size_t response_n)
+ {
+   gpg_error_t err = GPG_ERR_NO_ERROR;
+   gcry_sexp_t sexp_signature = NULL;
+   gcry_sexp_t sexp_data = NULL;
+-  gcry_mpi_t mpi_signature = NULL;
+ 
+-  /* Convert buffers into MPIs.  */
+-  if (! err)
++  /* Create according S-Expressions.  */
++  if (! err) {
++    //set data hash type based on key type
++    switch (key_type)
+     {
+-      if (gcry_mpi_scan (&mpi_signature, GCRYMPI_FMT_USG, response, response_n,
+-			 NULL))
+-	err = gpg_error (GPG_ERR_BAD_MPI);
+-    }
++      case kType_rsa:
++        err = gcry_sexp_build (&sexp_data, NULL,
++             "(data (flags pkcs1) (hash sha256 %b))",
++             challenge_n, challenge);
++        break;
++
++      case kType_ecc_Ed25519:
++        err = gcry_sexp_build (&sexp_data, NULL,
++             "(data(flags eddsa)(hash-algo sha512)(value %b))",
++             challenge_n, challenge);
++        break;
++
++      default:
++        err = GPG_ERR_CONFIGURATION;
++    }//switch
++
++
++       }
++
++  if (! err) {
++      //set sig value based on key type key type
++      switch (key_type)
++      {
++        case kType_rsa:
++        err = gcry_sexp_build (&sexp_signature, NULL, "(sig-val(rsa(s%b)))",
++             response_n,response);
++          break;
++
++        case kType_ecc_Ed25519:
++        err = gcry_sexp_build (&sexp_signature, NULL, "(sig-val(eddsa(r%b)(s%b)))",
++                               response_n/2, response,
++                               response_n/2, response + response_n/2);
++          break;
++
++        default:
++          err = GPG_ERR_CONFIGURATION;
++      }//switch
+ 
+-  /* Create according S-Expressions.  */
+-  if (! err)
+-    err = gcry_sexp_build (&sexp_data, NULL,
+-			   "(data (flags pkcs1) (hash sha1 %b))",
+-			   challenge_n, challenge);
+-  if (! err)
+-    err = gcry_sexp_build (&sexp_signature, NULL, "(sig-val (rsa (s %m)))",
+-			   mpi_signature);
++    }
+ 
+   /* Verify.  */
+   if (! err)
+@@ -113,8 +152,6 @@ challenge_verify_sexp (gcry_sexp_t sexp_key,
+     gcry_sexp_release (sexp_data);
+   if (sexp_signature)
+     gcry_sexp_release (sexp_signature);
+-  if (mpi_signature)
+-    gcry_mpi_release (mpi_signature);
+ 
+   return err;
+ }
+@@ -125,13 +162,13 @@ challenge_verify_sexp (gcry_sexp_t sexp_key,
+    the secret key belonging to the public key given as PUBLIC_KEY.
+    Returns proper error code.  */
+ gpg_error_t
+-challenge_verify (gcry_sexp_t public_key,
++challenge_verify (gcry_sexp_t public_key, key_types key_type,
+ 		  unsigned char *challenge, size_t challenge_n,
+ 		  unsigned char *response, size_t response_n)
+ {
+   gpg_error_t err;
+ 
+-  err = challenge_verify_sexp (public_key,
++  err = challenge_verify_sexp (public_key, key_type,
+ 			       challenge, challenge_n, response, response_n);
+ 
+   return err;
+@@ -186,7 +223,7 @@ sexp_to_string (gcry_sexp_t sexp, char **sexp_string)
+ 
+   *sexp_string = buffer;
+   err = 0;
+-  
++
+  out:
+ 
+   if (err)
+@@ -372,7 +409,7 @@ int
+ my_strlen (const char *s)
+ {
+   int ret = 0;
+-  
++
+   while (*s)
+     {
+       if (ret == INT_MAX)
+@@ -387,4 +424,23 @@ my_strlen (const char *s)
+   return ret;
+ }
+ 
++
++/* Copied from gnome-keyring */
++void wipestr(char *data) {
++    volatile char *vp;
++    size_t len;
++    if (!data) {
++        return;
++    }
++    /* Defeats some optimizations */
++    len = strlen(data);
++    memset(data, 0xAA, len);
++    memset(data, 0xBB, len);
++    /* Defeats others */
++    vp = (volatile char*) data;
++    while (*vp) {
++        *(vp++) = 0xAA;
++    }
++    gcry_free((void *) data);
++}
+ /* END */
+diff --git a/src/util/support.h b/src/util/support.h
+index e25cf01..3d1150c 100644
+--- a/src/util/support.h
++++ b/src/util/support.h
+@@ -1,18 +1,18 @@
+ /* support.h - PAM authentication via OpenPGP smartcards.
+    Copyright (C) 2004, 2005, 2007, 2008 g10 Code GmbH
+- 
++
+    This file is part of Poldi.
+-  
++
+    Poldi is free software; you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+-  
++
+    Poldi is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    General Public License for more details.
+-  
++
+    You should have received a copy of the GNU Lesser General Public
+    License along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
+@@ -23,12 +23,12 @@
+ 
+ #include <gcrypt.h>
+ #include <dirent.h>
+-
++#include "key-types.h"
+ /* This function generates a challenge; the challenge will be stored
+    in newly allocated memory, which is to be stored in *CHALLENGE;
+    it's length in bytes is to be stored in *CHALLENGE_N.  Returns
+    proper error code.  */
+-gpg_error_t challenge_generate (unsigned char **challenge, size_t *challenge_n);
++gpg_error_t challenge_generate (unsigned char **challenge, size_t *challenge_n, key_types key_type);
+ 
+ /* Releases the challenge contained in CHALLENGE generated by
+    challenge_generate().  */
+@@ -39,7 +39,7 @@ void challenge_release (unsigned char *challenge);
+    challenge given in CHALLENGE of size CHALLENGE_N (in bytes) with
+    the secret key belonging to the public key given as PUBLIC_KEY.
+    Returns proper error code.  */
+-gpg_error_t challenge_verify (gcry_sexp_t public_key,
++gpg_error_t challenge_verify (gcry_sexp_t public_key, key_types key_type,
+ 			      unsigned char *challenge, size_t challenge_n,
+ 			      unsigned char *response, size_t response_n);
+ 
+@@ -71,6 +71,8 @@ void char_vector_free (char **a);
+ 
+ int my_strlen (const char *s);
+ 
++void wipestr(char *data);
++
+ #endif
+ 
+ /* END */
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index 7128f92..7f34f1a 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -17,7 +17,7 @@
+ # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
+ # 02111-1307, USA
+ 
+-noinst_PROGRAMS = parse-test pam-test
++noinst_PROGRAMS = parse-test pam-test session-test
+ 
+ parse_test_SOURCES = parse-test.c
+ parse_test_CFLAGS = -Wall -I$(top_srcdir)/src/util -I$(top_srcdir)/src \
+@@ -29,3 +29,10 @@ pam_test_SOURCES = pam-test.c
+ pam_test_CFLAGS = -Wall
+ 
+ pam_test_LDADD = -lpam -lpam_misc
++
++
++session_test_SOURCES = session-test.c
++session_test_CFLAGS = -Wall -I$(top_srcdir)/src/util -I$(top_srcdir)/src \
++ $(GPG_ERROR_CFLAGS)
++session_test_LDADD = $(top_builddir)/src/util/libpoldi-util.a \
++ $(GPG_ERROR_LIBS) $(LIBGCRYPT_LIBS) -lpamtest
+\ No newline at end of file
+diff --git a/tests/README b/tests/README
+index e281b57..1b11f8b 100644
+--- a/tests/README
++++ b/tests/README
+@@ -36,3 +36,49 @@ This is how a successful run looks like:
+   $ 
+ 
+ Have fun.
++
++
++
++README for session-test
++===================
++  Usage: run-pam-session-test.sh [options] <user name>
++  Test PAM authentication.
++  
++  Options:
++   -h, --help      print help information
++   -v, --version   print version information
++   
++   This test must be ran with an account that will have permission
++   to access the gpg and scdaemon sockets created for the user
++   specified in the command. To ensure a proper test you will need
++   to send the SIGTERM signal to any gpg-agent and scdeamon processes
++   running under the user.
++   
++   You will need to update the path in the ./services/other folder to
++   point to the pam_poldi.so module you are testing.
++   
++   session-test is a utility used to test the session component 
++   of the poldi module. It requires the libpamtest library found 
++   in the libpam-wrapper library and a properly 
++   configured openpgp card/usb key. 
++   
++   session-test is invoked using the script run-pam-session-test.sh
++   This is becuase libpamtest needs to preload a wrapper around libpam.
++   libpamtest also requires exec privileges in the directory /tmp
++   
++   session-test sets the following exit values to indicate run status:
++   
++	PAMTEST_ERR_OK:           0
++	PAMTEST_ERR_START:        1
++	PAMTEST_ERR_CASE:         2
++	PAMTEST_ERR_OP:           3
++	PAMTEST_ERR_END:          4
++	PAMTEST_ERR_KEEPHANDLE:   5
++	
++	unknown error             all other postiive numbers
++	
++	Success is indicated by an exit status of 0
++
++	
++	
++	
+diff --git a/tests/run-pam-session-test.sh b/tests/run-pam-session-test.sh
+new file mode 100755
+index 0000000..b49a01e
+--- /dev/null
++++ b/tests/run-pam-session-test.sh
+@@ -0,0 +1,88 @@
++#!/bin/sh 
++
++#Sets up libpam-wrapper preloader for libpam
++#and starts session-test 
++
++#bins
++pam_session_test_id='/usr/bin/id'
++pam_session_test_ls='/usr/bin/ls'
++
++session_bin='session-test'
++
++#set debug level
++# 0 = Error
++# 1 = Warning
++# 2 = Debug
++# 3 = Trace
++pam_session_debuglevel=1
++
++#preloader command with options
++preloader_cmd="LD_PRELOAD=libpam_wrapper.so PAM_WRAPPER=1 PAM_WRAPPER_USE_SYSLOG=0 PAM_WRAPPER_DEBUGLEVEL=${pam_session_debuglevel} PAM_WRAPPER_SERVICE_DIR=./services ./${session_bin}"
++
++#paths
++pam_session_run_dir='/run/user/'
++pam_session_gpg_sock='/gnupg/S.gpg-agent'
++pam_session_scd_sock='/gnupg/S.scdaemon'
++
++pam_check_depd() {
++   
++   #check for id command
++   if [ ! -f "${pam_session_test_id}" ]
++   then
++      printf 'Error id command required\n'
++      return 1
++   fi
++   
++   #check for ls command
++   if [ ! -f "${pam_session_test_ls}" ]
++   then
++      printf 'Error ls command required\n'
++      return 1
++   fi
++   
++   return 0
++   
++}
++pam_session_test_main () {
++
++#check for dependices
++if ! pam_check_depd
++then
++   return 1
++fi
++
++#check if gpg-agent/scd is running for user
++if [ -f "${pam_session_test_id}" ]
++then
++   if [ ! -z "$1" ]
++   then
++      pam_session_uid=$(eval "${pam_session_test_id} --user $1")
++
++      if eval "${pam_session_test_ls} ${pam_session_run_dir}${pam_session_uid}${pam_session_gpg_sock}" 2> '/dev/null'
++      then
++         printf 'Warning Found Running gpg-agent for user\n'
++         printf 'Please stop gpg-agent before testing\n\n'
++      fi
++      
++      if eval "${pam_session_test_ls} ${pam_session_run_dir}${pam_session_uid}${pam_session_scd_sock}" 2> '/dev/null'
++      then
++         printf 'Warning Found Running scdaemon for user\n'
++         printf 'Please stop scdaemon before testing\n\n'
++      fi
++      
++   fi
++fi
++
++#run session-test with preloader for libpam
++if  [ -f "${session_bin}" ]
++then
++   printf '\nStarting libpam with preloader . . .\n\n'
++   eval "${preloader_cmd} $1"
++else
++   printf 'Error Please compile session-test\n'
++fi
++
++   return 0
++}
++
++pam_session_test_main "$@"
+diff --git a/tests/services/other b/tests/services/other
+new file mode 100644
+index 0000000..d668256
+--- /dev/null
++++ b/tests/services/other
+@@ -0,0 +1,2 @@
++auth		required	/usr/lib/x86_64-linux-gnu/security/pam_poldi.so
++session		required	/usr/lib/x86_64-linux-gnu/security/pam_poldi.so
+diff --git a/tests/session-test.c b/tests/session-test.c
+new file mode 100644
+index 0000000..aab7f45
+--- /dev/null
++++ b/tests/session-test.c
+@@ -0,0 +1,209 @@
++#include <assert.h>
++#include <stdio.h>
++#include <stdarg.h>
++#include <unistd.h>
++#include <getopt.h>
++#include <errno.h>
++
++#include <gpg-error.h>
++#include <libpamtest.h>
++
++#include <simpleparse.h>
++#include <simplelog.h>
++#include "scd/scd.h"
++
++#define MAX_STR_LENGTH      	   513
++#define MAX_USABLE_STR_LENGTH      512
++#define str(x)          # x
++#define xstr(x)         str(x)
++
++#define PROGRAM_NAME    "session-test"
++#define PROGRAM_VERSION "0.1"
++
++//void test_scd_connect(const char *username, log_handle_t loghandle, pam_handle_t *pam_handle);
++static void print_help(void);
++static void print_version (void);
++static void print_error(enum pamtest_err perr);
++
++int main (int argc, char*const* argv)
++{
++	gpg_error_t err = 0;
++	log_handle_t loghandle = NULL;
++	const char *username = NULL;
++
++	int rt_val;
++
++	assert (argc > 0);
++
++	err = log_create (&loghandle);
++	assert (!err);
++
++	err = log_set_backend_stream (loghandle, stderr);
++	assert (!err);
++
++	if (argc != 2)
++	{
++		print_help();
++		return 1;
++	}
++
++	while(1)
++	{
++		static struct option long_options[] =
++		{
++		  { "version", no_argument, 0, 'v' },
++		  { "help", no_argument, 0, 'h' },
++		  { "user", required_argument, 0, 'u' },
++		  { 0, 0, 0, 0 }
++		};
++
++		int index = 0;
++
++		rt_val = getopt_long (argc, argv, "vh:",
++			       long_options, &index);
++
++		//end of options
++		if (rt_val == -1)
++		{
++			 break;
++		}
++
++		switch (rt_val)
++		{
++		case 'u':
++			username = strdup (optarg);
++			if (!username)
++			{
++			  fprintf (stderr, "failed to duplicate username: %s", strerror (errno));
++			  exit (1);
++			}
++			break;
++
++		case 'h':
++			print_help();
++			exit(0);
++			break;
++
++		case 'v':
++			print_version();
++			exit(0);
++			break;
++
++		case '?':
++			break;//error
++
++		default:
++			abort();
++		}//switch
++
++
++
++	}//while
++
++	if (argc - optind != 1)
++	{
++	  print_help ();
++	  exit (1);
++	}
++
++	username = argv[optind];
++
++	printf("Testing for user %s \n", username);
++	printf("Testing poldi-session \n");
++
++	//get test pin from user
++	char buff[MAX_STR_LENGTH];
++	printf("Enter pin: ");
++	err = scanf("%"xstr(MAX_USABLE_STR_LENGTH)"s", buff);
++
++	//scanf error
++	if(err <= 0)
++	{
++		printf("Error reading pin\n");
++		return 10;
++	}
++
++	enum pamtest_err perr;
++	const char *new_authtoks[] = {
++	        buff,   //pin
++	        NULL,	//
++			NULL,   //send no pin, test if already unlocked
++	};
++	struct pamtest_conv_data conv_data = {
++	     .in_echo_off = new_authtoks,
++	};
++	struct pam_testcase tests[] = {
++	    /* pam function to execute and expected return code */
++	    pam_test(PAMTEST_AUTHENTICATE, PAM_SUCCESS),
++		pam_test(PAMTEST_OPEN_SESSION, PAM_SUCCESS),
++		pam_test(PAMTEST_AUTHENTICATE, PAM_SUCCESS),
++	};
++
++	perr = run_pamtest("poldi",	//service name
++						username,	//username
++	                    &conv_data, tests);	//conversation data and array of tests
++
++	print_error(perr);
++	return perr;
++
++
++}//main
++
++
++static void print_help (void)
++{
++  printf ("\
++Usage: %s [options] <user name>\n\
++Test PAM session.\n\
++\n\
++Options:\n\
++ -h, --help      print help information\n\
++ -v, --version   print version information\n\
++\n", PROGRAM_NAME);
++}
++
++
++static void print_version (void)
++{
++  printf (PROGRAM_NAME " " PROGRAM_VERSION "\n");
++}
++
++static void print_error(enum pamtest_err perr)
++{
++	switch (perr)
++	{
++	   case PAMTEST_ERR_OK:
++		  printf("Pass\n");
++		  break;
++
++	   case PAMTEST_ERR_START:
++		 printf("Error Starting pam\n");
++		  break;
++
++	   case PAMTEST_ERR_CASE:
++		  printf("Error couldn't run test case\n");
++		  break;
++
++	   case PAMTEST_ERR_OP:
++		  printf("Error couldn't run test case\n");
++		  break;
++
++	   case PAMTEST_ERR_END:
++		  printf("Error pam end faild\n");
++		  break;
++
++	   case PAMTEST_ERR_KEEPHANDLE:
++		  printf("Error internal\n");
++		  break;
++
++	   case PAMTEST_ERR_INTERNAL:
++		  printf("Error internal\n");
++		  break;
++
++	   default:
++		 printf("Error unknown\n");
++
++	};
++}
++
++

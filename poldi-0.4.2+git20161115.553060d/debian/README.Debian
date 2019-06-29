@@ -1,0 +1,21 @@
+Poldi for Debian
+================
+
+1) Usage
+--------
+
+To actually activate the pam module, you have to modifiy the files in
+/etc/pam.d/. If, for example, you want to login to gdm with your card,
+remove the line
+  @include common-auth
+and replace it by
+  auth    required   pam_poldi.so
+
+2) Divergence from upstream
+---------------------------
+
+The former Debian extensionse try_pin and quiet options are not
+present anymore.
+
+ -- Lionel Elie Mamane <lionel@mamane.lu>, Thu, 30 Jul 2009 19:56:54 +0200
+

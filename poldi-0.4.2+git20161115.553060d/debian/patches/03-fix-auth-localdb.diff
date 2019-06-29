@@ -1,0 +1,17 @@
+Description: Bug fix calling log_msg_debug
+Author: NIIBE Yutaka
+Last-Update: 2013-07-10
+
+Index: poldi-0.4.1/src/pam/auth-method-localdb/auth-localdb.c
+===================================================================
+--- poldi-0.4.1.orig/src/pam/auth-method-localdb/auth-localdb.c	2013-07-10 12:57:28.896538720 +0000
++++ poldi-0.4.1/src/pam/auth-method-localdb/auth-localdb.c	2013-07-10 12:57:28.844538737 +0000
+@@ -118,7 +118,7 @@
+ 
+   if (ctx->debug)
+     {
+-      log_msg_debug (ctx->conv,
++      log_msg_debug (ctx->loghandle,
+ 		     _("Trying authentication as user `%s'..."), username);
+       conv_tell (ctx->conv,
+ 		 _("Trying authentication as user `%s'..."), username);

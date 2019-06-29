@@ -1,0 +1,205 @@
+poldi (0.4.2+git20161115.553060d-1~qi4) unstable; urgency=medium
+
+  * Add ECC key support, (Closes: #922055)
+  * Add session module to keep scd key unlocked after authentication
+
+ -- Taylor, Eric <eric.taylor@quoininc.com>  Sat, 29 Jun 2019 16:07:45 +0500
+ 
+poldi (0.4.2+git20161115.553060d-1) unstable; urgency=medium
+
+  * New upstream.
+  * debian/README.Debian: Update.
+  * debian/pam-configs/poldi: Remove.
+  * debian/postinst: Remove pam-auth-update.
+  * debian/prerm: Remove.
+  * debian/libpam-poldi.install: Don't install pam-configs.
+  * debian/patches/01-auth-timeout.diff: Rename and refresh.
+
+ -- NIIBE Yutaka <gniibe@fsij.org>  Fri, 11 Nov 2016 16:07:45 +0900
+
+poldi (0.4.2+git20161107.16912be-1) unstable; urgency=medium
+
+  * New upstream (with fixed configure).
+  * debian/control (Build-Depends): Change libgcrypt11-dev to
+  libgcrypt20-dev.  Remove libusb-dev (Closes: #810454).
+  (Standards-Version): Conforms to 3.9.8.
+  (Recommends): gnupg2 is changed to gnupg.
+  (Multi-Arch): Add "same" for libpam-poldi package.
+  * debian/rules: Fix for Multi-Arch.
+  Add --libexecdir (Closes: #811094).
+  * debian/pam-configs/poldi: New (Closes: #811096).
+  Thanks to Andrew Gallagher <Andrew.Gallagher@ward.ie>.
+  * debian/libpam-poldi.install, debian/prerm: New.
+  * debian/libpam-poldi.info: New.
+  * debian/postinst: Add pam-auth-update.
+  * debian/libpam-poldi.manpages, debian/poldi-ctrl.1: Remove.
+  * debian/patches/04-fix-config.diff: New.
+  * debian/copyright: Update.
+  * debian/compat: 10.
+
+ -- NIIBE Yutaka <gniibe@fsij.org>  Mon, 07 Nov 2016 13:35:19 +0900
+
+poldi (0.4.2+git20151221.338f78b-1) unstable; urgency=low
+
+  * debian/copyright: Updated (Closes: #716658).
+  * New upstream with document fixed (Closes: #790892).
+
+ -- NIIBE Yutaka <gniibe@fsij.org>  Mon, 21 Dec 2015 01:50:13 +0000
+
+poldi (0.4.2+git20151216.49a1cab-1) unstable; urgency=low
+
+  * New upstream with most Debian patches merged.
+  * Let it build on hppa (Closes: #799719).
+  * debian/control (Standard-Version): Bump to 3.9.6.
+  
+ -- NIIBE Yutaka <gniibe@fsij.org>  Wed, 16 Dec 2015 08:20:17 +0000
+
+poldi (0.4.1-3) unstable; urgency=low
+
+  * debian/control (Maintainer): New maintainer (Closes: #708833).
+    (Build-Depends): Require debhelper >= 9 and autotools-dev.
+    (Standard-Version): Bump to 3.9.4.
+    [libpam-poldi] (Depends): Replace to scdaemon (was: gpgsm).
+    (Recommends): Replace to gnupg2 (was: gnupg).
+  * debian/postrm: New (Closes: #656459).  Thanks to Andreas Beckmann.
+  * debian/compat: Require 9.
+  * debian/watch: New.  Thanks to Bart Martens.
+  * debian/NEWS: Remove (as it's 0.3 -> 0.4, from etch to lenny).
+  * debian/source/format: New.
+  * debian/patches/01-debian-specific-0.4.1.diff: New.
+  * debian/patches/02-ldflags-0.4.1.diff: New.
+  * debian/patches/03-fix-auth-localdb.diff: New.
+  * debian/rules: Re-write to use debhelper.
+  * Incorporate NMU.
+
+ -- NIIBE Yutaka <gniibe@fsij.org>  Wed, 10 Jul 2013 12:13:34 +0000
+
+poldi (0.4.1-2.1) unstable; urgency=low
+
+  * NMU
+  * Add -lgpg-error when linking tests, to fix FTBFS. Closes: #556068.
+  * Lintian-inspired cleanups:
+    + Update debhelper compat level from 4 to 8
+    + Add simple initial build-arch and build-indep rules
+    + Update Standards-Version
+    + Move from dh_clean -k to dh_prep
+    + Add versioned debhelper dep on version 8+
+    + Add depends on dpkg (>= 1.15.4) | install-info
+    + Remove .../info/dir.gz
+
+ -- Steve McIntyre <steve.mcintyre@linaro.org>  Tue, 03 Jan 2012 14:57:20 +0000
+
+poldi (0.4.1-2) unstable; urgency=low
+
+  * Install a global scdaemon config file, scdaemon bails out if it does
+    not find it.
+  * Document that situation in README.Debian
+  * logrotate for the logfile
+  * ensure logfile is created with secure permissions
+
+ -- Lionel Elie Mamane <lmamane@debian.org>  Thu, 30 Jul 2009 20:32:20 +0200
+
+poldi (0.4.1-1) unstable; urgency=low
+
+  * New upstream version (closes: #502562)
+     - Handle missing reader gracefully (closes: #428053)
+  * New comaintainer
+  * Add Homepage field to debian/control
+  * Bump up Standards-Version to 3.8.2
+  * Make poldi much more silent when not in debug mode
+  * Tweak some prompts
+  * Shut up scdaemon when not in verbose mode
+  * Make scdaemon use a global configuration file
+  * Timeout (3s hardcoded) when waiting for a smartcard
+  * Allow PIN with any character (not only digits)
+  * Reasonable default configuration file
+
+ -- Lionel Elie Mamane <lmamane@debian.org>  Thu, 30 Jul 2009 19:24:02 +0200
+
+poldi (0.3.0-4.1) unstable; urgency=low
+
+  * Non-maintainer upload.
+  * 0-day alpha porter NMU.
+  * Don't call vsyslog with a NULL ap argument; this is abuse of the C
+    standard, and syslog() does what's wanted here anyway.  Closes: #353532.
+
+ -- Steve Langasek <vorlon@debian.org>  Tue, 01 May 2007 00:01:17 -0700
+
+poldi (0.3.0-4) unstable; urgency=low
+
+  * tries to load libpcsclite.so instead of libpcsclite.so.1 (Closes:
+    #368146)
+
+ -- Joachim Breitner <nomeata@debian.org>  Sat, 20 May 2006 14:12:51 +0200
+
+poldi (0.3.0-3) unstable; urgency=low
+
+  * pin as option hack
+  * quiet option
+  * README.Debian about that
+  * Explain activating the pam module, closes: #365046
+  * Bumping policy, no change
+
+ -- Joachim Breitner <nomeata@debian.org>  Fri,  5 May 2006 22:29:20 +0200
+
+poldi (0.3.0-2) unstable; urgency=low
+
+  * Upload to unstable. Should closes: #327516.
+
+ -- Joachim Breitner <nomeata@debian.org>  Wed,  8 Feb 2006 14:21:31 +0100
+
+poldi (0.3.0-1) experimental; urgency=low
+
+  * New upstream release
+
+ -- Joachim Breitner <nomeata@debian.org>  Thu, 22 Dec 2005 19:10:54 +0100
+
+poldi (0.3-cvs-1) UNRELEASED; urgency=low
+
+  * Upstream preview release
+  * Removed PIN-from-Logindata-hack, thus removed REAMDE.Debian
+
+ -- Joachim Breitner <nomeata@debian.org>  Tue,  8 Nov 2005 21:36:36 +0100
+
+poldi (0.2-cvs2-6) experimental; urgency=low
+
+  * Hope I can finally closes: #314764
+  * Bumped standards version (no change)
+
+ -- Joachim Breitner <nomeata@debian.org>  Sun, 10 Jul 2005 18:57:36 +0300
+
+poldi (0.2-cvs2-5) experimental; urgency=low
+
+  * Closes: #314764: FTBFS in experimental: Not using -fPIC to build
+    shared lib.
+
+ -- Joachim Breitner <nomeata@debian.org>  Mon, 20 Jun 2005 09:21:33 +0200
+
+poldi (0.2-cvs2-4) experimental; urgency=low
+
+  * Closes: #311176: [FTBFS] missing dependency?
+    Same bug as last time. Guess I was interrupted last time I worked on this
+    and forgot about it. Sigh.
+
+ -- Joachim Breitner <nomeata@debian.org>  Sun, 29 May 2005 17:28:27 +0200
+
+poldi (0.2-cvs2-3) experimental; urgency=low
+
+  * Adding more missing Build-Deps (Closes: #309741), hopefully I got all by
+    now. And I should upload the package when I do fixes :-)
+
+ -- Joachim Breitner <nomeata@debian.org>  Fri, 20 May 2005 10:09:51 +0200
+
+poldi (0.2-cvs2-2) experimental; urgency=low
+
+  * Adding some missing Build-Deps (Closes: #309166)
+
+ -- Joachim Breitner <nomeata@debian.org>  Tue, 17 May 2005 00:19:42 +0200
+
+poldi (0.2-cvs2-1) experimental; urgency=low
+
+  * Initial Release.
+  * read pin from login data (debian-specifiy patch)
+
+ -- Joachim Breitner <nomeata@debian.org>  Mon,  1 Nov 2004 22:48:41 +0100
+

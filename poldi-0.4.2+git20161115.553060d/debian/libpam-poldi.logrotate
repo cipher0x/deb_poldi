@@ -1,0 +1,10 @@
+/var/log/poldi {
+	rotate 4
+	weekly
+	missingok
+	notifempty
+	create 640 root adm
+	compress
+	delaycompress
+	sharedscripts
+}
