@@ -1,4 +1,4 @@
-poldi (0.4.2+git20161115.553060d-1~qi4) unstable; urgency=medium
+poldi (0.4.2+git20161115.553060d-2~qi4) unstable; urgency=medium
 
   * Add ECC key support, (Closes: #922055)
   * Add session module to keep scd key unlocked after authentication
